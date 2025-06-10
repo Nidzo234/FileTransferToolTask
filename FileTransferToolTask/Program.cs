@@ -16,6 +16,7 @@ namespace FileTransferToolTask {
             destinationPath = Path.Combine(destinationPath, fileName);
 
             const int ChunkSize = 1024 * 1024;
+            const int MaxRetries = 3;
             byte[] buffer = new byte[ChunkSize];
             int totalBytesCopied = 0;
 
@@ -31,19 +32,39 @@ namespace FileTransferToolTask {
                 byte[] sourceChunk = buffer[..bytesRead];
                 byte[] sourceHash = MD5.HashData(sourceChunk);
 
-                fsWrite.Write(sourceChunk, 0, bytesRead);
-                fsWrite.Seek(totalBytesCopied, SeekOrigin.Begin);
+                bool verified = false;
+                int retryCount = 0;
 
-                byte[] destinationChunk = new byte[bytesRead];
-                fsWrite.Read(destinationChunk, 0, bytesRead);
-                byte[] destinationHash = MD5.HashData(destinationChunk);
-
-                if (!sourceHash.SequenceEqual(destinationHash))
+                while (!verified && retryCount<MaxRetries)
                 {
-                    Console.WriteLine("Chunk failed verification!!!");
+                    fsWrite.Seek(totalBytesCopied, SeekOrigin.Begin);
+                    fsWrite.Write(sourceChunk, 0, bytesRead);
+                    fsWrite.Flush();
+
+                    fsWrite.Seek(totalBytesCopied, SeekOrigin.Begin);
+                    byte[] destinationChunk = new byte[bytesRead];
+                    fsWrite.Read(destinationChunk, 0, bytesRead);
+                    byte[] destinationHash = MD5.HashData(destinationChunk);
+
+                    if (sourceHash.SequenceEqual(destinationHash))
+                    {
+                        verified = true;
+                    }
+                    else
+                    {
+                        retryCount++;
+                        Console.WriteLine("Chunk failed verification!!!");
+                    }
+                }
+
+                if (!verified)
+                {
+                    Console.WriteLine($"Copying failed after {retryCount} retries");
+                    return;
                 }
                 totalBytesCopied += bytesRead;
             }
+
             Console.WriteLine("File copied successfully.");
 
         }
