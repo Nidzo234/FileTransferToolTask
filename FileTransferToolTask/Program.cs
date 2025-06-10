@@ -1,8 +1,18 @@
 ﻿using System.Security.Cryptography;
+using System.Text;
 
 namespace FileTransferToolTask {
     class Program
     {
+        public static string ByteArrayToString(byte[] arr)
+        {
+            StringBuilder stringBuilder = new StringBuilder(arr.Length);
+            for (int i = 0; i < arr.Length; i++)
+            {
+                stringBuilder.Append(arr[i].ToString("x2"));
+            }
+            return stringBuilder.ToString();
+        }
         public static void CopyFile(string sourcePath, string destinationPath)
         {
             if (!File.Exists(sourcePath))
@@ -15,10 +25,11 @@ namespace FileTransferToolTask {
             string fileName = Path.GetFileName(sourcePath);
             destinationPath = Path.Combine(destinationPath, fileName);
 
-            const int ChunkSize = 1024 * 1024;
+            const int ChunkSize = 1024;
             const int MaxRetries = 3;
             byte[] buffer = new byte[ChunkSize];
             int totalBytesCopied = 0;
+            int blockIndex = 1;
 
             using FileStream fsRead = new FileStream(sourcePath, FileMode.Open, FileAccess.Read);
             using FileStream fsWrite = new FileStream(destinationPath, FileMode.Create, FileAccess.ReadWrite);
@@ -31,6 +42,8 @@ namespace FileTransferToolTask {
 
                 byte[] sourceChunk = buffer[..bytesRead];
                 byte[] sourceHash = MD5.HashData(sourceChunk);
+
+                Console.WriteLine($"{blockIndex}. position = {totalBytesCopied}, hash = {ByteArrayToString(sourceHash)}");
 
                 bool verified = false;
                 int retryCount = 0;
@@ -63,6 +76,7 @@ namespace FileTransferToolTask {
                     return;
                 }
                 totalBytesCopied += bytesRead;
+                blockIndex++;
             }
 
             Console.WriteLine("File copied successfully.");
