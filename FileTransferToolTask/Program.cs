@@ -1,10 +1,11 @@
-﻿using System.Security.Cryptography;
+﻿using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace FileTransferToolTask {
     class Program
-    {
-        public static string ByteArrayToString(byte[] arr)
+    { 
+        private static string ByteArrayToString(byte[] arr)
         {
             StringBuilder stringBuilder = new StringBuilder(arr.Length);
             for (int i = 0; i < arr.Length; i++)
@@ -12,6 +13,41 @@ namespace FileTransferToolTask {
                 stringBuilder.Append(arr[i].ToString("x2"));
             }
             return stringBuilder.ToString();
+        }
+
+        private static void ComputeSHA256Hash(FileStream sourceFileStrem, FileStream destinationFileStream)
+        {
+            using (SHA256 mySHA256 = SHA256.Create())
+            {
+                try
+                {
+                    sourceFileStrem.Seek(0, SeekOrigin.Begin);
+                    destinationFileStream.Seek(0, SeekOrigin.Begin);
+
+                    byte[] sourceHashValue = mySHA256.ComputeHash(sourceFileStrem);
+                    byte[] destinationHashValue = mySHA256.ComputeHash(destinationFileStream);
+
+                    Console.WriteLine($"Source file hash: {ByteArrayToString(sourceHashValue)}");
+                    Console.WriteLine($"Destination file hash: {ByteArrayToString(destinationHashValue)}");
+
+                    if (sourceHashValue.SequenceEqual(destinationHashValue))
+                    {
+                        Console.WriteLine("File copied successfully.");
+                    }
+                    else
+                    {
+                        Console.WriteLine("File copy completed, but final hash verification failed!");
+                    }
+                }
+                catch (IOException e)
+                {
+                    Console.WriteLine($"I/O Exception: {e.Message}");
+                }
+                catch (UnauthorizedAccessException e)
+                {
+                    Console.WriteLine($"Access Exception: {e.Message}");
+                }
+            }
         }
         public static void CopyFile(string sourcePath, string destinationPath)
         {
@@ -25,7 +61,7 @@ namespace FileTransferToolTask {
             string fileName = Path.GetFileName(sourcePath);
             destinationPath = Path.Combine(destinationPath, fileName);
 
-            const int ChunkSize = 1024;
+            const int ChunkSize = 1024 * 1024;
             const int MaxRetries = 3;
             byte[] buffer = new byte[ChunkSize];
             int totalBytesCopied = 0;
@@ -78,8 +114,7 @@ namespace FileTransferToolTask {
                 totalBytesCopied += bytesRead;
                 blockIndex++;
             }
-
-            Console.WriteLine("File copied successfully.");
+            ComputeSHA256Hash(fsRead, fsWrite);
 
         }
         public static void Main(string[] args)
