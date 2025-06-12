@@ -9,6 +9,7 @@ namespace FileTransferToolTask {
         private const int ChunkSize = 1024 * 1024;
         private const int MaxRetries = 3;
         private const int threadCount = 2;
+        private enum HashType { MD5, SHA1, SHA256};
         private static string ByteArrayToString(byte[] arr)
         {
             StringBuilder stringBuilder = new StringBuilder(arr.Length);
@@ -19,42 +20,49 @@ namespace FileTransferToolTask {
             return stringBuilder.ToString();
         }
 
-        private static void ComputeSHA256Hash(string sourcePath, string destinationPath)
+        private static HashAlgorithm GetHashAlgorithm(HashType hashType) => hashType switch
         {
-            using (SHA256 mySHA256 = SHA256.Create())
+            HashType.MD5 => MD5.Create(),
+            HashType.SHA1 => SHA1.Create(),
+            HashType.SHA256 => SHA256.Create(),
+            _ => throw new NotSupportedException($"Hash type {hashType} is not supported")
+        };
+
+        private static void ComputeFileHash(string sourcePath, string destinationPath, HashAlgorithm hashAlgorithm)
+        {
+            
+            try
             {
-                try
+                var sourceFileStream = File.OpenRead(sourcePath);
+                var destinationFileStream = File.OpenRead(destinationPath);
+
+                sourceFileStream.Seek(0, SeekOrigin.Begin);
+                destinationFileStream.Seek(0, SeekOrigin.Begin);
+
+                byte[] sourceHashValue = hashAlgorithm.ComputeHash(sourceFileStream);
+                byte[] destinationHashValue = hashAlgorithm.ComputeHash(destinationFileStream);
+
+                Console.WriteLine($"Source file hash:      {ByteArrayToString(sourceHashValue)}");
+                Console.WriteLine($"Destination file hash: {ByteArrayToString(destinationHashValue)}");
+
+                if (sourceHashValue.SequenceEqual(destinationHashValue))
                 {
-                    var sourceFileStream = File.OpenRead(sourcePath);
-                    var destinationFileStream = File.OpenRead(destinationPath);
-
-                    sourceFileStream.Seek(0, SeekOrigin.Begin);
-                    destinationFileStream.Seek(0, SeekOrigin.Begin);
-
-                    byte[] sourceHashValue = mySHA256.ComputeHash(sourceFileStream);
-                    byte[] destinationHashValue = mySHA256.ComputeHash(destinationFileStream);
-
-                    Console.WriteLine($"Source file hash:      {ByteArrayToString(sourceHashValue)}");
-                    Console.WriteLine($"Destination file hash: {ByteArrayToString(destinationHashValue)}");
-
-                    if (sourceHashValue.SequenceEqual(destinationHashValue))
-                    {
-                        Console.WriteLine("File copied successfully.");
-                    }
-                    else
-                    {
-                        Console.WriteLine("File copy completed, but final hash verification failed!");
-                    }
+                    Console.WriteLine("File copied successfully.");
                 }
-                catch (IOException e)
+                else
                 {
-                    Console.WriteLine($"I/O Exception: {e.Message}");
-                }
-                catch (UnauthorizedAccessException e)
-                {
-                    Console.WriteLine($"Access Exception: {e.Message}");
+                    Console.WriteLine("File copy completed, but final hash verification failed!");
                 }
             }
+            catch (IOException e)
+            {
+                Console.WriteLine($"I/O Exception: {e.Message}");
+            }
+            catch (UnauthorizedAccessException e)
+            {
+                Console.WriteLine($"Access Exception: {e.Message}");
+            }
+            
         }
 
         private static void CopyChunks(string sourcePath, string destinationPath, long fileSize)
@@ -157,7 +165,7 @@ namespace FileTransferToolTask {
             }
             Console.WriteLine(endTime.Subtract(startTime).TotalMilliseconds + "ms");
 
-            ComputeSHA256Hash(sourcePath, destinationPath);
+            ComputeFileHash(sourcePath, destinationPath, GetHashAlgorithm(HashType.SHA256));
 
         }
         public static void Main(string[] args)
