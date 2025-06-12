@@ -4,7 +4,10 @@ using System.Text;
 
 namespace FileTransferToolTask {
     class Program
-    { 
+    {
+        private static long offset = 0;
+        private const int ChunkSize = 1024 * 1024;
+        private const int MaxRetries = 3;
         private static string ByteArrayToString(byte[] arr)
         {
             StringBuilder stringBuilder = new StringBuilder(arr.Length);
@@ -15,19 +18,22 @@ namespace FileTransferToolTask {
             return stringBuilder.ToString();
         }
 
-        private static void ComputeSHA256Hash(FileStream sourceFileStrem, FileStream destinationFileStream)
+        private static void ComputeSHA256Hash(string sourcePath, string destinationPath)
         {
             using (SHA256 mySHA256 = SHA256.Create())
             {
                 try
                 {
-                    sourceFileStrem.Seek(0, SeekOrigin.Begin);
+                    var sourceFileStream = File.OpenRead(sourcePath);
+                    var destinationFileStream = File.OpenRead(destinationPath);
+
+                    sourceFileStream.Seek(0, SeekOrigin.Begin);
                     destinationFileStream.Seek(0, SeekOrigin.Begin);
 
-                    byte[] sourceHashValue = mySHA256.ComputeHash(sourceFileStrem);
+                    byte[] sourceHashValue = mySHA256.ComputeHash(sourceFileStream);
                     byte[] destinationHashValue = mySHA256.ComputeHash(destinationFileStream);
 
-                    Console.WriteLine($"Source file hash: {ByteArrayToString(sourceHashValue)}");
+                    Console.WriteLine($"Source file hash:      {ByteArrayToString(sourceHashValue)}");
                     Console.WriteLine($"Destination file hash: {ByteArrayToString(destinationHashValue)}");
 
                     if (sourceHashValue.SequenceEqual(destinationHashValue))
@@ -49,48 +55,45 @@ namespace FileTransferToolTask {
                 }
             }
         }
-        public static void CopyFile(string sourcePath, string destinationPath)
+
+        private static void CopyChunks(string sourcePath, string destinationPath, long fileSize)
         {
-            if (!File.Exists(sourcePath))
-            {
-                Console.WriteLine($"Source does not exist at '{sourcePath}'.");
-                return;
-            }
-            Console.WriteLine("Starting copying file...");
-
-            string fileName = Path.GetFileName(sourcePath);
-            destinationPath = Path.Combine(destinationPath, fileName);
-
-            const int ChunkSize = 1024 * 1024;
-            const int MaxRetries = 3;
-            byte[] buffer = new byte[ChunkSize];
-            int totalBytesCopied = 0;
-            int blockIndex = 1;
-
-            using FileStream fsRead = new FileStream(sourcePath, FileMode.Open, FileAccess.Read);
-            using FileStream fsWrite = new FileStream(destinationPath, FileMode.Create, FileAccess.ReadWrite);
+ 
+            using FileStream fsRead = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using FileStream fsWrite = new FileStream(destinationPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
 
             while (true)
             {
-                int bytesRead = fsRead.Read(buffer, 0, ChunkSize);
+                long currentPosition = Interlocked.Add(ref offset, ChunkSize) - ChunkSize;
+
+                if (currentPosition >= fileSize)
+                    break;
+
+
+                int actualSize = (int)Math.Min(ChunkSize, fileSize - currentPosition);
+                byte [] buffer = new byte[actualSize];
+
+                fsRead.Seek(currentPosition, SeekOrigin.Begin);
+                int bytesRead = fsRead.Read(buffer, 0, actualSize);
                 if (bytesRead == 0)
                     break;
 
                 byte[] sourceChunk = buffer[..bytesRead];
                 byte[] sourceHash = MD5.HashData(sourceChunk);
 
-                Console.WriteLine($"{blockIndex}. position = {totalBytesCopied}, hash = {ByteArrayToString(sourceHash)}");
+                long blockIndex = currentPosition / ChunkSize + 1;
+                Console.WriteLine($"{blockIndex}. position = {currentPosition}, hash = {ByteArrayToString(sourceHash)}");
 
                 bool verified = false;
                 int retryCount = 0;
 
-                while (!verified && retryCount<MaxRetries)
+                while (!verified && retryCount < MaxRetries)
                 {
-                    fsWrite.Seek(totalBytesCopied, SeekOrigin.Begin);
+                    fsWrite.Seek(currentPosition, SeekOrigin.Begin);
                     fsWrite.Write(sourceChunk, 0, bytesRead);
                     fsWrite.Flush();
 
-                    fsWrite.Seek(totalBytesCopied, SeekOrigin.Begin);
+                    fsWrite.Seek(currentPosition, SeekOrigin.Begin);
                     byte[] destinationChunk = new byte[bytesRead];
                     fsWrite.Read(destinationChunk, 0, bytesRead);
                     byte[] destinationHash = MD5.HashData(destinationChunk);
@@ -111,10 +114,45 @@ namespace FileTransferToolTask {
                     Console.WriteLine($"Copying failed after {retryCount} retries");
                     return;
                 }
-                totalBytesCopied += bytesRead;
-                blockIndex++;
             }
-            ComputeSHA256Hash(fsRead, fsWrite);
+        }
+        public static void CopyFile(string sourcePath, string destinationPath)
+        {
+            if (!File.Exists(sourcePath))
+            {
+                Console.WriteLine($"Source does not exist at '{sourcePath}'.");
+                return;
+            }
+            Console.WriteLine("Starting copying file...");
+
+            string fileName = Path.GetFileName(sourcePath);
+            destinationPath = Path.Combine(destinationPath, fileName);
+
+            long fileLength = new FileInfo(sourcePath).Length;
+            using (FileStream destInit = new FileStream(destinationPath, FileMode.Create, FileAccess.Write))
+            {
+                destInit.SetLength(fileLength);
+            }
+            offset = 0;
+
+            Thread thread1 = new Thread(() => CopyChunks(sourcePath, destinationPath, fileLength));
+            Thread thread2= new Thread(() => CopyChunks(sourcePath, destinationPath, fileLength));
+            DateTime startTime = DateTime.Now;
+
+            thread1.Start();
+            thread2.Start();
+         
+            thread1.Join();
+            thread2.Join();
+
+            DateTime endTime = DateTime.Now;
+            using (FileStream flushStream = new FileStream(destinationPath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
+            {
+                flushStream.Flush();
+            }
+            Console.WriteLine(endTime.Subtract(startTime).TotalMilliseconds + "ms");
+
+            ComputeSHA256Hash(sourcePath, destinationPath);
 
         }
         public static void Main(string[] args)
