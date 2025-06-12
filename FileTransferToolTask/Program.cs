@@ -8,6 +8,7 @@ namespace FileTransferToolTask {
         private static long offset = 0;
         private const int ChunkSize = 1024 * 1024;
         private const int MaxRetries = 3;
+        private const int threadCount = 2;
         private static string ByteArrayToString(byte[] arr)
         {
             StringBuilder stringBuilder = new StringBuilder(arr.Length);
@@ -135,17 +136,21 @@ namespace FileTransferToolTask {
             }
             offset = 0;
 
-            Thread thread1 = new Thread(() => CopyChunks(sourcePath, destinationPath, fileLength));
-            Thread thread2= new Thread(() => CopyChunks(sourcePath, destinationPath, fileLength));
+            Thread[] threads = new Thread[threadCount];
+
+            for (int i = 0; i < threadCount; i++)
+                threads[i] = new Thread(() => CopyChunks(sourcePath, destinationPath, fileLength));
+            
             DateTime startTime = DateTime.Now;
 
-            thread1.Start();
-            thread2.Start();
-         
-            thread1.Join();
-            thread2.Join();
+            foreach (Thread thread in threads)
+                thread.Start();
+            
+            foreach (Thread thread in threads)
+                thread.Join(); 
 
             DateTime endTime = DateTime.Now;
+
             using (FileStream flushStream = new FileStream(destinationPath, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
             {
                 flushStream.Flush();
